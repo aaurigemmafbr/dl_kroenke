@@ -51,11 +51,16 @@ if html_input.strip():
 
 # --- DOWNLOAD ---
 if st.session_state.df is not None and not st.session_state.df.empty:
-    csv_bytes = st.session_state.df.to_csv(index=False).encode("utf-8")
+    import base64
 
-    st.download_button(
-        label="Download CSV",
-        data=csv_bytes,
-        file_name="output.csv",
-        mime="text/csv"
+    csv_bytes = st.session_state.df.to_csv(index=False).encode("utf-8")
+    b64 = base64.b64encode(csv_bytes).decode()
+
+    st.markdown(
+        f"""
+        <a href="data:file/csv;base64,{b64}" download="output.csv">
+            ⬇️ Download CSV
+        </a>
+        """,
+        unsafe_allow_html=True
     )
