@@ -16,13 +16,15 @@ This tool will extract the table and convert it into a downloadable CSV.
 """
 )
 
+# Initialize session state
+if "df" not in st.session_state:
+    st.session_state.df = None
+
 html_input = st.text_area(
     "Paste HTML here:",
     height=300,
     placeholder="<table>...</table>"
 )
-
-df = None  # <-- important
 
 if html_input.strip():
     try:
@@ -34,10 +36,11 @@ if html_input.strip():
             df = tables[0]
 
             column_name = "Donation Amount: Payer Info"
-
             if column_name in df.columns:
                 df[column_name] = df[column_name].astype(str).str.strip()
                 df = df[df[column_name] != "-"]
+
+            st.session_state.df = df  # ✅ persist it
 
             st.success("Table successfully extracted!")
             st.dataframe(df, width="stretch")
@@ -46,14 +49,17 @@ if html_input.strip():
         st.error("Unable to parse HTML.")
         st.code(str(e))
 
-# --- DOWNLOAD (outside try block) ---
-if df is not None and not df.empty:
-    csv_bytes = df.to_csv(index=False).encode("utf-8")
+# --- DOWNLOAD ---
+if st.session_state.df is not None and not st.session_state.df.empty:
+    csv_bytes = st.session_state.df.to_csv(index=False).encode("utf-8")
 
     st.download_button(
         label="Download CSV",
         data=csv_bytes,
         file_name="output.csv",
+        mime="text/csv"
+    )
+
         mime="text/csv"
     )
 
