@@ -59,7 +59,3 @@ if st.session_state.df is not None and not st.session_state.df.empty:
         file_name="output.csv",
         mime="text/csv"
     )
-
-        mime="text/csv"
-    )
-
