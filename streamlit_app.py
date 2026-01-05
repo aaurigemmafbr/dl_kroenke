@@ -40,7 +40,7 @@ if html_input.strip():
                 df = df[df[column_name] != "-"]
 
             st.success("Table successfully extracted!")
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, width="stretch")
 
     except Exception as e:
         st.error("Unable to parse HTML.")
