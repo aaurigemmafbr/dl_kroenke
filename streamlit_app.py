@@ -1,55 +1,187 @@
 import streamlit as st
 import pandas as pd
 from io import StringIO
+import re
+from datetime import datetime
 
-st.set_page_config(page_title="Kroenke HTML Table --> CSV", layout="centered")
+st.set_page_config(page_title="Kroenke HTML Table → CSV", layout="centered")
 
 st.title("Kroenke HTML Table to CSV Converter")
 
 st.markdown(
     """
-Open the jotform table. Right click --> Inspect  
-Locate the data table by expanding the <body> (click the ... between body tags)  
-Click on the ... on the left side of the table with id "data-table" --> Copy --> Copy Element  
-Paste the HTML table below  
-This tool will extract the table and convert it into a downloadable CSV.
+Paste the HTML table copied from Jotform below.
+
+**Steps:**
+1. Open the Jotform table
+2. Right-click → Inspect
+3. Expand `<body>` → find table with id `data-table`
+4. Click `…` → Copy → Copy Element
+5. Paste below
 """
 )
 
-# Initialize session state
+# -------------------------
+# Session state
+# -------------------------
 if "df" not in st.session_state:
     st.session_state.df = None
 
+# -------------------------
+# HTML input
+# -------------------------
 html_input = st.text_area(
-    "Paste HTML here:",
+    "Paste HTML table here:",
     height=300,
     placeholder="<table>...</table>"
 )
 
+# -------------------------
+# Date range selector
+# -------------------------
+st.subheader("Filter by Submission Date")
+
+date_range = st.date_input(
+    "Select date range",
+    value=None
+)
+
+# -------------------------
+# Helper functions
+# -------------------------
+def parse_submission_date(val):
+    """
+    Converts 'YYYY-MM-DD HH:MM:SS' → datetime.date
+    """
+    try:
+        return datetime.strptime(val, "%Y-%m-%d %H:%M:%S").date()
+    except Exception:
+        return None
+
+
+def parse_payer_info(text):
+    """
+    Extracts:
+    - First Name
+    - Middle Initial (only if exactly one letter)
+    - Last Name
+    - Email
+    - Transaction ID
+    """
+    if pd.isna(text):
+        return pd.Series([None, None, None, None, None])
+
+    text = str(text)
+
+    # --- Full Name ---
+    full_name_match = re.search(r"Full Name:\s*(.*?)\s+Email:", text)
+    full_name = full_name_match.group(1).strip() if full_name_match else ""
+
+    parts = full_name.split()
+
+    first_name = None
+    middle_initial = None
+    last_name = None
+
+    if len(parts) == 1:
+        first_name = parts[0]
+
+    elif len(parts) >= 2:
+        first_name = parts[0]
+
+        # Middle initial only if exactly one letter
+        if len(parts[1]) == 1 and parts[1].isalpha():
+            middle_initial = parts[1]
+            last_name = " ".join(parts[2:]) if len(parts) > 2 else None
+        else:
+            last_name = " ".join(parts[1:])
+
+    # --- Email ---
+    email_match = re.search(r"Email:\s*([^\s]+)", text)
+    email = email_match.group(1) if email_match else None
+
+    # --- Transaction ID ---
+    tx_match = re.search(r"Transaction ID:\s*([^\s]+)", text)
+    transaction_id = tx_match.group(1) if tx_match else None
+
+    return pd.Series([
+        first_name,
+        middle_initial,
+        last_name,
+        email,
+        transaction_id
+    ])
+
+# -------------------------
+# Main processing
+# -------------------------
 if html_input.strip():
     try:
         tables = pd.read_html(StringIO(html_input))
 
         if not tables:
-            st.error("No HTML tables were found.")
+            st.error("No HTML tables found.")
         else:
             df = tables[0]
 
-            column_name = "Donation Amount: Payer Info"
-            if column_name in df.columns:
-                df[column_name] = df[column_name].astype(str).str.strip()
-                df = df[df[column_name] != "-"]
+            # --- Parse Submission Date ---
+            df["Parsed Submission Date"] = df["Submission Date"].apply(parse_submission_date)
 
-            st.session_state.df = df  # ✅ persist it
+            # --- Date filtering ---
+            if date_range and len(date_range) == 2:
+                start_date, end_date = date_range
+                df = df[
+                    (df["Parsed Submission Date"] >= start_date) &
+                    (df["Parsed Submission Date"] <= end_date)
+                ]
 
-            st.success("Table successfully extracted!")
-            st.dataframe(df, width="stretch")
+            # --- Remove rows with "-" payer info ---
+            payer_col = "Donation Amount: Payer Info"
+            if payer_col in df.columns:
+                df[payer_col] = df[payer_col].astype(str).str.strip()
+                df = df[df[payer_col] != "-"]
+
+            # --- Parse payer info into columns ---
+            parsed_cols = df[payer_col].apply(parse_payer_info)
+            parsed_cols.columns = [
+                "First Name",
+                "Middle Initial",
+                "Last Name",
+                "Email",
+                "Transaction ID"
+            ]
+
+            df = pd.concat([df, parsed_cols], axis=1)
+
+            # --- Final output columns ---
+            df["Date"] = df["Parsed Submission Date"].apply(
+                lambda d: d.strftime("%m/%d/%Y") if pd.notna(d) else None
+            )
+
+            final_df = df[[
+                "Date",
+                "First Name",
+                "Middle Initial",
+                "Last Name",
+                "Email",
+                "Transaction ID",
+                "Total Donation Amount"
+            ]]
+
+            st.session_state.df = final_df
+
+            st.success("Table processed successfully!")
+            st.dataframe(final_df, width="stretch")
 
     except Exception as e:
         st.error("Unable to parse HTML.")
         st.code(str(e))
 
-
-st.info(
-    "⬇️ To download the CSV: hover over the preview table and click the download button"
-)
+# -------------------------
+# Download instructions
+# -------------------------
+if st.session_state.df is not None and not st.session_state.df.empty:
+    st.info(
+        "⬇️ To download the CSV, click the **⋮** menu in the top-right of the table "
+        "and select **Download as CSV**."
+    )
